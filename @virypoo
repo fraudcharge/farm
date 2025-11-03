@@ -9,7 +9,7 @@ local Player = Players.LocalPlayer
 ------------------------------------------------------------
 -- 📦 Create GUI
 ------------------------------------------------------------
-local window = library:CreateWindow("@fraudulentcharge chainsaw man script @yibisu a nigger")
+local window = library:CreateWindow("@fraudulentcharge Chainsaw Man Script")
 local FarmTab = window:CreateTab("AutoFarm")
 local PlayerTab = window:CreateTab("Player")
 local ESPTab = window:CreateTab("ESP")
@@ -93,7 +93,7 @@ local function orbitAndAttack(npc)
 
     local conn
     conn = RunService.RenderStepped:Connect(function()
-        if not autofarmRunning or not npc or not npc.Parent or not npc.Humanoid or npc.Humanoid.Health <= 0 then
+        if not autofarmRunning or not npc or not npc.Parent or not npc:FindFirstChild("Humanoid") or npc.Humanoid.Health <= 0 then
             if conn then conn:Disconnect() end
             return
         end
@@ -110,7 +110,7 @@ local function orbitAndAttack(npc)
     end)
 end
 
-FarmTab:CreateButton("AutoFarm", function()
+FarmTab:CreateButton("Toggle AutoFarm", function()
     autofarmRunning = not autofarmRunning
     notify("AutoFarm", autofarmRunning and "✅ Enabled" or "❌ Disabled")
 
@@ -137,7 +137,7 @@ FarmTab:CreateButton("AutoFarm", function()
                     if hrp then
                         local dist = (hrp.Position - quest_boy.Position).Magnitude
                         if dist > 8 then
-                            hrp.CFrame = CFrame.new(quest_boy.Position + Vector3.new(0, 0, -2), quest_boy.Position)
+                            hrp.CFrame = CFrame.new(quest_boy.Position + Vector3.new(0,0,-2), quest_boy.Position)
                         else
                             local prompt = quest_boy.Parent:FindFirstChildOfClass("ProximityPrompt")
                             if prompt then pcall(fireproximityprompt, prompt) end
@@ -168,7 +168,7 @@ end)
 -- ✅ Auto Complete Quest
 ------------------------------------------------------------
 local questOn = false
-FarmTab:CreateButton("Auto Complete Quest", function()
+FarmTab:CreateButton("Toggle Auto Complete Quest", function()
     questOn = not questOn
     notify("Auto Complete Quest", questOn and "✅ Enabled" or "❌ Disabled")
 
@@ -208,7 +208,7 @@ end)
 ------------------------------------------------------------
 local playerEspEnabled = false
 local playerEspObjects = {}
-ESPTab:CreateButton("Player ESP", function()
+ESPTab:CreateButton("Toggle Player ESP", function()
     playerEspEnabled = not playerEspEnabled
     notify("Player ESP", playerEspEnabled and "✅ Enabled" or "❌ Disabled")
 
