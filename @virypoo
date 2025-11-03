@@ -1,29 +1,47 @@
--- Load @vir Library
-local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/fraudcharge/vir/main/@vir/Library.lua'))()
+-- Full Chainsaw Man Script — Enhanced with ESP, Devil Heart AutoFarm, Config Save/Load
+-- Includes AutoFarm, Devil Heart AutoCollect, Orbit Modes, ESP, Black Fly Platform
+
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
 local Player = Players.LocalPlayer
 
-------------------------------------------------------------
--- 📦 Create GUI
-------------------------------------------------------------
-local window = library:CreateWindow("@fraudulentcharge Chainsaw Man Script")
-local FarmTab = window:CreateTab("AutoFarm")
-local PlayerTab = window:CreateTab("Player")
-local ESPTab = window:CreateTab("ESP")
-local HalloweenTab = window:CreateTab("Halloween")
+-- Load @vir Library
+local ok, library = pcall(function()
+    return loadstring(game:HttpGet('https://raw.githubusercontent.com/fraudcharge/vir/main/@vir/Library.lua'))()
+end)
+if not ok or type(library) ~= "table" then warn("Failed to load GUI library") return end
 
-------------------------------------------------------------
--- ⚙️ Utility
-------------------------------------------------------------
-local function notify(title, content)
-    library:Notify(title .. ": " .. content)
+-- Window
+local window = library:CreateWindow({
+    Title = "Chainsaw Man — Devil's Heart (Enhanced)",
+    AutoShow = true,
+    Center = true,
+    Size = UDim2.fromOffset(680, 600),
+    TabPadding = 6,
+    MenuFadeTime = 0.12
+})
+library:SetWatermark("Chainsaw Man • Devil's Heart")
+
+-- Tabs
+local autoTab = window:AddTab("AutoFarm")
+local playerTab = window:AddTab("Player")
+local espTab = window:AddTab("ESP")
+local eventTab = window:AddTab("Halloween")
+local miscTab = window:AddTab("Misc")
+
+-- ==================== Utilities ====================
+local function notify(text, t)
+    library:Notify(text, t or 3)
 end
 
-local function touchPart(part)
-    if part and part:IsA("BasePart") and Player and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+local function safeTouch(part)
+    if not part or not part:IsA("BasePart") then return end
+    if Player and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
         pcall(function()
             firetouchinterest(Player.Character.HumanoidRootPart, part, 0)
             task.wait(0.05)
@@ -31,13 +49,6 @@ local function touchPart(part)
         end)
     end
 end
-
-------------------------------------------------------------
--- 🔁 AutoFarm
-------------------------------------------------------------
-local autofarmRunning = false
-local autofarmThread
-local lastEquipTime = 0
 
 local function getCharacter()
     while not Player.Character or not Player.Character:FindFirstChild("HumanoidRootPart") do
@@ -47,34 +58,44 @@ local function getCharacter()
     return Player.Character
 end
 
-local function equipKatana()
-    if tick() - lastEquipTime < 3 then return end
-    lastEquipTime = tick()
-
-    local char = getCharacter()
-    local backpack = Player:FindFirstChild("Backpack")
-    if backpack then
-        local katana = backpack:FindFirstChild("Katana") or char:FindFirstChild("Katana")
-        if katana and not char:FindFirstChild("Katana") then
-            char.Humanoid:EquipTool(katana)
+local function equipKatanaCooldown()
+    local last = 0
+    return function()
+        if tick() - last < 3 then return end
+        last = tick()
+        local char = getCharacter()
+        local backpack = Player:FindFirstChild("Backpack")
+        if backpack then
+            local katana = backpack:FindFirstChild("Katana") or char:FindFirstChild("Katana")
+            if katana and not char:FindFirstChild("Katana") then
+                pcall(function() char.Humanoid:EquipTool(katana) end)
+            end
         end
     end
 end
+local equipKatana = equipKatanaCooldown()
 
+-- ==================== Orbit Modes ====================
+local orbitModes = {"Orbit", "Above", "Below", "Behind"}
+local orbitMode = "Orbit"
+local orbitDistance = 7
+
+-- ==================== Closest Fiend ====================
 local function closestFiend()
-    local npcs = Workspace:FindFirstChild("Living")
+    local living = Workspace:FindFirstChild("Living")
     local closest, minDist = nil, math.huge
-    if npcs then
-        for _, npc in pairs(npcs:GetChildren()) do
-            if npc.Name:lower():find("fiend") and npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                local char = getCharacter()
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local dist = (hrp.Position - npc.HumanoidRootPart.Position).Magnitude
-                    if dist < minDist then
-                        closest = npc
-                        minDist = dist
-                    end
+    if not living then return nil end
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    local hrp = char.HumanoidRootPart
+    for _, npc in pairs(living:GetChildren()) do
+        if npc and npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
+            local name = tostring(npc.Name):lower()
+            if name:find("fiend") then
+                local d = (hrp.Position - npc.HumanoidRootPart.Position).Magnitude
+                if d < minDist then
+                    minDist = d
+                    closest = npc
                 end
             end
         end
@@ -82,161 +103,238 @@ local function closestFiend()
     return closest
 end
 
-local function orbitAndAttack(npc)
-    local char = getCharacter()
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local npcHRP = npc and npc:FindFirstChild("HumanoidRootPart")
-    if not hrp or not npcHRP then return end
-
-    local orbitSpeed = 6
-    local orbitRadius = 7
+-- ==================== Orbit/Follow Function ====================
+local function orbitAndAttack(targetObj, runningFlagGetter)
+    if not targetObj or not targetObj.Parent then return end
+    local char = Player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = char.HumanoidRootPart
+    local targetHRP = targetObj:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
 
     local conn
     conn = RunService.RenderStepped:Connect(function()
-        if not autofarmRunning or not npc or not npc.Parent or not npc:FindFirstChild("Humanoid") or npc.Humanoid.Health <= 0 then
+        if not runningFlagGetter() or not targetObj or not targetObj.Parent or not targetObj:FindFirstChild("Humanoid") or targetObj.Humanoid.Health <= 0 then
             if conn then conn:Disconnect() end
             return
         end
 
         equipKatana()
-        local angle = tick() * orbitSpeed
-        local offset = Vector3.new(math.cos(angle) * orbitRadius, 0, math.sin(angle) * orbitRadius)
-        local targetPos = npcHRP.Position + offset
-        hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(targetPos, npcHRP.Position), 0.4)
+        local targetPos = targetHRP.Position
+        if orbitMode == "Above" then
+            targetPos = targetPos + Vector3.new(0, orbitDistance, 0)
+            hrp.CFrame = CFrame.new(targetPos, targetHRP.Position)
+        elseif orbitMode == "Below" then
+            targetPos = targetPos - Vector3.new(0, orbitDistance, 0)
+            hrp.CFrame = CFrame.new(targetPos, targetHRP.Position)
+        elseif orbitMode == "Behind" then
+            local lookVec = targetHRP.CFrame.LookVector
+            targetPos = targetPos - lookVec * orbitDistance
+            hrp.CFrame = CFrame.new(targetPos, targetHRP.Position)
+        else -- Orbit
+            local angle = tick() * 6
+            local offset = Vector3.new(math.cos(angle) * orbitDistance, 0, math.sin(angle) * orbitDistance)
+            targetPos = targetPos + offset
+            hrp.CFrame = hrp.CFrame:Lerp(CFrame.new(targetPos, targetHRP.Position), 0.4)
+        end
 
         if ReplicatedStorage:FindFirstChild("events") and ReplicatedStorage.events:FindFirstChild("remote") then
-            ReplicatedStorage.events.remote:FireServer("NormalAttack")
+            pcall(function() ReplicatedStorage.events.remote:FireServer("NormalAttack") end)
         end
     end)
 end
 
-FarmTab:CreateButton("Toggle AutoFarm", function()
-    autofarmRunning = not autofarmRunning
-    notify("AutoFarm", autofarmRunning and "✅ Enabled" or "❌ Disabled")
+-- ==================== AutoFarm Tab ====================
+local farmLeft = autoTab:AddLeftGroupbox("AutoFarm Controls")
 
-    if autofarmRunning then
-        autofarmThread = task.spawn(function()
-            local quest_boy = Workspace:WaitForChild("DialogNPCs"):WaitForChild("grown up boy"):WaitForChild("HumanoidRootPart")
+local autofarmToggle = farmLeft:AddToggle("autofarm_toggle", {Text = "AutoFarm (Fiends)", Default = false})
+autofarmToggle:OnChanged(function(v) notify(v and "AutoFarm enabled" or "AutoFarm disabled") end)
 
-            while autofarmRunning do
-                local char = getCharacter()
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                if not hrp then task.wait(0.1) continue end
+-- Orbit Mode Dropdown
+local orbitDropdown = farmLeft:AddDropdown("orbit_mode", {Text = "Orbit Mode", Default = orbitModes[1], Values = orbitModes})
+orbitDropdown:OnChanged(function(val) orbitMode = val end)
 
-                local questGui = Player:FindFirstChild("PlayerGui") and Player.PlayerGui:FindFirstChild("Quest")
-                local questActive = false
-                if questGui and questGui:FindFirstChild("quest") and questGui:FindFirstChild("progress") then
-                    local quest = questGui.quest
-                    local progress = questGui.progress
-                    if tostring(quest.Value):lower():find("fiends") and tonumber(progress.Value) < tonumber((questGui.max and questGui.max.Value) or 3) then
-                        questActive = true
-                    end
-                end
+-- Orbit Distance Slider
+local orbitSlider = farmLeft:AddSlider("orbit_distance", {Text = "Orbit Distance", Min = 3, Max = 15, Default = 7, Rounding = 1})
+orbitSlider:OnChanged(function(val) orbitDistance = val end)
 
-                if not questActive then
-                    if hrp then
-                        local dist = (hrp.Position - quest_boy.Position).Magnitude
-                        if dist > 8 then
-                            hrp.CFrame = CFrame.new(quest_boy.Position + Vector3.new(0,0,-2), quest_boy.Position)
-                        else
-                            local prompt = quest_boy.Parent:FindFirstChildOfClass("ProximityPrompt")
-                            if prompt then pcall(fireproximityprompt, prompt) end
-                        end
-                    end
-                else
-                    local npc = closestFiend()
-                    if npc then
-                        orbitAndAttack(npc)
-                        repeat task.wait(0.1) until not npc or not npc.Parent or not npc:FindFirstChild("Humanoid") or npc.Humanoid.Health <= 0 or not autofarmRunning
-                    else
-                        task.wait(0.5)
-                    end
-                end
-
-                task.wait(0.3)
-            end
-        end)
+-- Quest Complete Toggle (teleports to NPC)
+local questCompleteToggle = farmLeft:AddToggle("questauto_toggle", {Text = "Auto Complete Quest (Will TP)", Default = false})
+questCompleteToggle:OnChanged(function(v)
+    if v then
+        notify("Auto quest enabled — Will teleport you to quest giver!", 5)
     else
-        if autofarmThread then
-            task.cancel(autofarmThread)
-            autofarmThread = nil
+        notify("Auto quest disabled", 3)
+    end
+end)
+
+-- Devil Heart AutoFarm Toggle
+local devilHeartToggle = farmLeft:AddToggle("auto_devil_heart", {Text = "Auto Collect Devil Hearts (Will TP)", Default = false})
+devilHeartToggle:OnChanged(function(v)
+    if v then notify("Auto Devil Heart collect enabled — Will teleport you!", 5) end
+end)
+
+-- Autofarm loop
+task.spawn(function()
+    while true do
+        local char = getCharacter()
+        local hrp = char.HumanoidRootPart
+        -- AutoFiend
+        if autofarmToggle.Value then
+            local npc = closestFiend()
+            if npc then
+                orbitAndAttack(npc, function() return autofarmToggle.Value end)
+                repeat task.wait(0.1) until not npc or not npc.Parent or not npc:FindFirstChild("Humanoid") or npc.Humanoid.Health <= 0 or not autofarmToggle.Value
+            else
+                task.wait(0.5)
+            end
         end
+        -- Auto Quest
+        if questCompleteToggle.Value then
+            local dialog = Workspace:FindFirstChild("DialogNPCs")
+            if dialog and dialog:FindFirstChild("grown up boy") then
+                local npcHRP = dialog["grown up boy"]:FindFirstChild("HumanoidRootPart")
+                if npcHRP then
+                    hrp.CFrame = CFrame.new(npcHRP.Position + Vector3.new(0,0,-2), npcHRP.Position)
+                    local prompt = dialog["grown up boy"]:FindFirstChildOfClass("ProximityPrompt")
+                    if prompt then pcall(fireproximityprompt, prompt) end
+                end
+            end
+        end
+        -- Auto Devil Heart Collect
+        if devilHeartToggle.Value then
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("MeshPart") and tostring(obj.MeshId) == "rbxassetid://12439777368" then
+                    hrp.CFrame = CFrame.new(obj.Position + Vector3.new(0,3,0))
+                    safeTouch(obj)
+                    task.wait(0.1)
+                end
+            end
+        end
+        task.wait(0.3)
     end
 end)
 
-------------------------------------------------------------
--- ✅ Auto Complete Quest
-------------------------------------------------------------
-local questOn = false
-FarmTab:CreateButton("Toggle Auto Complete Quest", function()
-    questOn = not questOn
-    notify("Auto Complete Quest", questOn and "✅ Enabled" or "❌ Disabled")
+-- ==================== ESP Tab ====================
+local espLeft = espTab:AddLeftGroupbox("ESP Tools")
+local playerEspToggle = espLeft:AddToggle("player_esp", {Text = "Player ESP", Default = false})
+local devilEspToggle = espLeft:AddToggle("devil_esp", {Text = "Devil Heart ESP", Default = false})
 
-    if questOn then
-        task.spawn(function()
-            while questOn do
-                task.wait(0.2)
-                local interactable = Workspace:FindFirstChild("Interactable")
-                if interactable then
-                    local goals = interactable:FindFirstChild("pizzagoals")
-                    local couch = interactable:FindFirstChild("CouchGoal")
+local espPlayers = {}
+local espDevils = {}
 
-                    if goals then
-                        for _, part in ipairs(goals:GetDescendants()) do
-                            if not questOn then break end
-                            if part:IsA("BasePart") then
-                                touchPart(part)
-                                task.wait(0.1)
-                            end
-                        end
+local function createESPAdorn(parent, color)
+    local adorn = Instance.new("BoxHandleAdornment")
+    adorn.Size = parent.Size or Vector3.new(2,2,2)
+    adorn.Adornee = parent
+    adorn.Color3 = color
+    adorn.AlwaysOnTop = true
+    adorn.ZIndex = 10
+    adorn.Transparency = 0.4
+    adorn.Parent = parent
+    return adorn
+end
+
+task.spawn(function()
+    while true do
+        -- Player ESP
+        if playerEspToggle.Value then
+            for _, plr in pairs(Players:GetPlayers()) do
+                if plr ~= Player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                    if not espPlayers[plr] then
+                        espPlayers[plr] = createESPAdorn(plr.Character.HumanoidRootPart, Color3.fromRGB(0,255,0))
                     end
-
-                    if couch and couch:IsA("BasePart") then
-                        touchPart(couch)
-                        task.wait(0.2)
-                    end
-                else
-                    task.wait(0.2)
                 end
             end
-        end)
+        else
+            for _, adorn in pairs(espPlayers) do if adorn then adorn:Destroy() end end
+            espPlayers = {}
+        end
+
+        -- Devil Heart ESP
+        if devilEspToggle.Value then
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("MeshPart") and tostring(obj.MeshId) == "rbxassetid://12439777368" then
+                    if not espDevils[obj] then
+                        espDevils[obj] = createESPAdorn(obj, Color3.fromRGB(255,0,0))
+                    end
+                end
+            end
+        else
+            for _, adorn in pairs(espDevils) do if adorn then adorn:Destroy() end end
+            espDevils = {}
+        end
+
+        task.wait(0.5)
     end
 end)
 
-------------------------------------------------------------
--- 🧍 Player ESP
-------------------------------------------------------------
-local playerEspEnabled = false
-local playerEspObjects = {}
-ESPTab:CreateButton("Toggle Player ESP", function()
-    playerEspEnabled = not playerEspEnabled
-    notify("Player ESP", playerEspEnabled and "✅ Enabled" or "❌ Disabled")
-
-    if playerEspEnabled then
-        task.spawn(function()
-            while playerEspEnabled do
-                for _, obj in ipairs(playerEspObjects) do if obj and obj.Parent then obj:Destroy() end end
-                table.clear(playerEspObjects)
-
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= Player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-                        local highlight = Instance.new("Highlight")
-                        highlight.FillColor = Color3.fromRGB(0, 255, 100)
-                        highlight.OutlineColor = Color3.fromRGB(0, 255, 100)
-                        highlight.Adornee = plr.Character
-                        highlight.Parent = plr.Character
-                        table.insert(playerEspObjects, highlight)
-                    end
-                end
-
-                task.wait(1)
+-- ==================== Player Tab ====================
+local playerLeft = playerTab:AddLeftGroupbox("Player Movement")
+local flyToggle = playerLeft:AddToggle("fly_toggle", {Text = "Fly Platform", Default = false})
+flyToggle:OnChanged(function(enabled)
+    if enabled then
+        local char = Player.Character or Player.CharacterAdded:Wait()
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        local p = Instance.new("Part")
+        p.Size = Vector3.new(8,1,8)
+        p.Anchored = true
+        p.Transparency = 0.5
+        p.Color = Color3.fromRGB(0,0,0)
+        p.Material = Enum.Material.Neon
+        p.Parent = Workspace
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not flyToggle.Value or not p or not p.Parent then
+                conn:Disconnect()
+                if p then p:Destroy() end
+                return
             end
-
-            for _, obj in ipairs(playerEspObjects) do if obj and obj.Parent then obj:Destroy() end end
-            table.clear(playerEspObjects)
+            local hrp2 = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp2 then p.CFrame = CFrame.new(hrp2.Position.X, hrp2.Position.Y-4, hrp2.Position.Z) end
         end)
+        notify("Fly platform enabled")
     else
-        for _, obj in ipairs(playerEspObjects) do if obj and obj.Parent then obj:Destroy() end end
-        table.clear(playerEspObjects)
+        notify("Fly platform disabled")
     end
 end)
+
+-- ==================== Misc Tab ====================
+local autoExecuteToggle = miscTab:AddToggle("auto_execute", {Text = "Auto Execute", Default = false})
+
+-- ==================== Config Save/Load ====================
+local configBox = miscTab:AddTextBox("config_name", {Text = "Config Name"})
+local saveButton = miscTab:AddButton("Save Config", function()
+    local name = configBox.Value
+    if name == "" then notify("Enter a name for the config!", 3) return end
+    local data = library:Save() -- saves all toggles/sliders/keybinds
+    writefile("ChainsawMan_"..name..".json", HttpService:JSONEncode(data))
+    notify("Config saved: "..name, 4)
+end)
+local loadDropdown = miscTab:AddDropdown("load_config", {Text = "Load Config", Default = "", Values = {}})
+local loadButton = miscTab:AddButton("Load Config", function()
+    local name = loadDropdown.Value
+    if name == "" then notify("Select a config to load!", 3) return end
+    if not isfile(name) then notify("Config not found!", 3) return end
+    local data = HttpService:JSONDecode(readfile(name))
+    library:Load(data)
+    notify("Config loaded: "..name, 4)
+end)
+
+-- Auto-populate saved configs
+task.spawn(function()
+    while true do
+        local files = isfolder and listfiles("") or {}
+        local configs = {}
+        for _, f in pairs(files) do
+            if f:match("ChainsawMan_.*%.json") then table.insert(configs, f) end
+        end
+        loadDropdown:SetValues(configs)
+        task.wait(5)
+    end
+end)
+
+-- Keep GUI toggle key
+library.ToggleKeybind = { Type = "KeyPicker", Value = "RightControl" }
+
+notify("Enhanced Chainsaw Man Script Loaded", 4)
